@@ -27,11 +27,13 @@ ncb <- ncp |>
 #' @param collections character. Collections.
 #' @param asset_names character. IDs.
 #' @param date_range character(1). Date range of the search.
-#' Should be formed YYYY-MM-DD/YYYY-MM-DD. The former should
+#' Should be formatted YYYY-MM-DD/YYYY-MM-DD. The former should
 #' predate the latter.
 #' @param bbox numeric(4). [sf::st_bbox] output.
 #' @param token character(1). Planetary Computer access token.
-#' @returns vsicurl data path.
+#' @param return_query logical(1). Return RSTACQuery object for gdalcube run.
+#' @returns vsicurl data path when `return_query = TRUE`
+#' or RSTACQuery object when `return_query = FALSE`.
 #' @author Insang Song
 #' @references [STAC specification][https://www.stacspec.org]
 #' @importFrom rstac stac_search
@@ -48,7 +50,8 @@ query_stac_pcomp <-
     asset_names = NULL,
     date_range = NULL,
     bbox = NULL,
-    token = NULL
+    token = NULL,
+    return_query = FALSE
   ) {
 
     # get full path to the dataset and extents
@@ -59,7 +62,11 @@ query_stac_pcomp <-
         bbox = bbox,
         datetime = date_range
       ) |>
-      rstac::get_request() |>
+      rstac::get_request()
+    if (return_query) {
+      return(full_query)
+    } 
+    url_query <- full_query |>
       rstac::items_sign(
         sign_fn =
         rstac::sign_planetary_computer(
@@ -67,7 +74,7 @@ query_stac_pcomp <-
         )
       ) |>
       rstac::assets_url(asset_names = asset_names)
-    return(full_query)
+    return(url_query)
     # vsicurl base
     # vsi_template <-
     #   paste0(
@@ -137,3 +144,119 @@ system.time(
 )
 #    user  system elapsed
 #   0.306   0.012   0.318
+
+
+ncmod13_filtered <- grep("MOD13", ncmod13, value = TRUE)
+ncmod13_sprc <- terra::sprc(ncmod13_filtered)
+ncmod13_sprc_mos <- terra::mosaic(ncmod13_sprc)
+
+
+query_stac_gen <-
+  function(
+    url_root = "https://planetarycomputer.microsoft.com/api/stac/v1",
+    collections = NULL,
+    asset_names = NULL,
+    date_range = NULL,
+    bbox = NULL,
+    token = NULL
+  ) {
+
+    # get full path to the dataset and extents
+    full_query <-
+      rstac::stac(url_root) |>
+      rstac::stac_search(
+        collections = collections,
+        bbox = bbox,
+        datetime = date_range
+      ) |>
+      rstac::get_request() |>
+      rstac::assets_url(asset_names = asset_names)
+    return(full_query)
+
+  }
+
+
+# datatime argument should abide by RFC3339
+# URLs listed in stacindex.org should be properly interpreted
+# to populate relevant arguments in rstac functions.
+# OK
+rstac::stac("https://tamn.snapplanet.io") |>
+  rstac::stac_search(
+    collections = "S2",
+    datetime = "2023-01-01T00:00:00Z/2024-01-07T23:59:00Z",
+    bbox = st_bbox(nc),
+    limit = 5L)|>
+  rstac::get_request()
+
+# application/xml error
+rstac::stac("https://storage.googleapis.com/earthengine-stac") |>
+  rstac::stac_search(
+    collections = "COPERNICUS",
+    datetime = "2023-01-01/2023-01-02", limit = 5L
+  ) |>
+  rstac::get_request()# |>
+#   rstac::assets_url(asset_names = "COPERNICUS_S2_CLOUD_PROBABILITY")
+
+
+# get results
+rstac::stac("https://landsatlook.usgs.gov/stac-server") |>
+  rstac::stac_search(
+    collections = "landsat-c2l2alb-ta",
+    datetime = "2023-01-01T00:00:00Z/2023-01-07T23:59:00Z", limit = 5L) |>
+  rstac::get_request()
+
+# authorization error
+rstac::stac("https://services.sentinel-hub.com/api/v1/catalog/1.0.0") |>
+  rstac::stac_search(
+    collections = "sentinel-2-l1c",
+    datetime = "2023-01-01T00:00:00Z/2023-01-07T23:59:00Z",
+    bbox = st_bbox(ashe),
+    limit = 5L) |>
+  rstac::get_request()
+
+
+rstac::stac("https://earthengine.openeo.org/v1.0") |>
+  rstac::stac_search(
+    collections = "AU/GA/AUSTRALIA_5M_DEM",
+    #datetime = "2023-01-01T00:00:00Z/2023-01-07T23:59:00Z",
+    #bbox = st_bbox(ashe),
+    limit = 5L)|>
+  rstac::get_request()
+
+# gdalcube
+# https://r-spatial.org/r/2021/04/23/cloud-based-cubes.html
+install.packages("gdalcubes")
+
+usmod13 <-
+  query_stac_pcomp(
+    collections = "modis-13A1-061",
+    asset_names = "500m_16_days_NDVI",
+    date_range = "2018-06-01/2018-07-31",
+    bbox = c(-128, 22, -60, 52),
+    token = utoken,
+    return_query = TRUE
+  )
+
+
+col <-
+  gdalcubes::stac_image_collection(
+    s = usmod13$features,
+    asset_names = "500m_16_days_NDVI"
+  )
+
+v <- gdalcubes::cube_view(
+  srs = "EPSG:5070",
+  extent = list(left = 1500000, right = 3000000, top = 3000000, bottom = 1000000,
+                t0 = "2018-06-01", t1 = "2018-07-31"),
+  dx = 500, dy = 500, dt = "P16D", aggregation = "median", resampling = "bilinear"
+)
+
+gdalcubes::gdalcubes_options(threads = 8)
+gdalcubes::raster_cube(col, v) |>
+  gdalcubes::reduce_time(c("median(500m_16_days_NDVI)")) |>
+  plot(zlim = c(-1000000, 10000000))
+
+ndvi_x <-
+  gdalcubes::raster_cube(col, v) |>
+  gdalcubes::reduce_time(c("median(500m_16_days_NDVI)")) |>
+  stars::st_as_stars()
