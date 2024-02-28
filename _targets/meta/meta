@@ -1,0 +1,20 @@
+name|type|data|command|depend|seed|path|time|size|bytes|format|repository|iteration|parent|children|seconds|warnings|error
+.Random.seed|object|2c468b79bc101555|||||||||||||||
+all_cores|object|0ad96d45f570ed27|||||||||||||||
+cl|object|3988fe8f7d45a055|||||||||||||||
+data|stem|0c943c1b8859fe60|27c63da42efbd6ed|c9c6bc7226868eb4|33550471||t19781.0660588436s|efe265e3f5f5ead3|674523|rds|local|vector|||0.013||
+datsf|stem|75fb5fb3b786a6b8|0063f624840c0f29|2130ecbef597ba90|305165727||t19781.2093780518s|3b5b9861e8d37442|1056733|rds|local|vector|||0.18||
+datsfpp|stem|fb1f6e20e13b4bae|a4ae0cf5a72740ad|879e7019e1faeb13|2117696522||t19781.2093801352s|775f6448a84cfc5e|1079177|rds|local|vector|||0.008||
+generate_predictions|function|96e0497981eaafa5|||||||||||||||
+load_data|function|a48d7a1efd05bd05|||||||||||||||
+load_results|function|8d0d11b1ff092c6d|||||||||||||||
+pkgs|object|659504f7c6f01e28|||||||||||||||
+prep_sf|function|94f32bc10eda3176|||||||||||||||
+preprocess_data|function|77d5956ccd76d0ad|||||||||||||||
+recipe_set|stem|252a9b45cfacc5d2|d5cf21d602f0717e|80a6f62cff7adcc5|73181520||t19781.2097816221s|db4262e5d5a3835b|296044|rds|local|vector|||0.019||
+reciping|function|5e7b74d1c8a191f4|||||||||||||||
+save_results|function|a08bfb40ccb2b843|||||||||||||||
+split_data|function|f95e614acc46b450|||||||||||||||
+tarsplit|stem|e7eea74f0c2c1607|85423de5fe41db6f|1482ec8c14b4a898|-1316684063||t19781.0744510744s||12205411|rds|local|vector|||0.044||Cant subset columns that dont exist. Column group doesnt exist.
+train_model|function|236a5bfe76e23cf7|||||||||||||||
+train0|stem||5c241dae1a67aa0a|004ad6f975c0b410|-1162926279||t19781.0665401344s||0|rds|local|vector|||0.475||nonnumeric argument to binary operator
