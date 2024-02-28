@@ -2,15 +2,22 @@ library(targets)
 source("./target-tidy/tidymodels_targets.r")
 
 tar_option_set(
-  packages = c("data.table", "dplyr", "terra", "sf", "tidymodels", "parallel", "xgboost", "fst", "future", "doFuture")
+  controller = 
+  crew::crew_controller_local(
+    workers = 8,
+    name = "default"
+  ),
+  # crew.cluster::crew_launcher_cluster(
+  #   name = "default"
+  # ),
+  packages = c("data.table", "dplyr", "terra", "sf", "tidymodels", "parallel", "xgboost", "fst", "future", "doFuture", "crew", "crew.cluster"),
 )
-
 
 ## target pipeline
 list(
   tar_target(
     data,
-    load_data()
+    fst::read_fst(file.path("target-tidy", "kinghouse.fst"))
   )
   ,
   tar_target(
@@ -25,7 +32,7 @@ list(
   ,
   tar_target(
     tarsplit,
-    split_data(datsfpp)
+    split_data(datsfpp, "zip4")
   )
   ,
   tar_target(

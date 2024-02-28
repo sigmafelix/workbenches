@@ -2,7 +2,6 @@
 # pkgs <- c("data.table", "dplyr", "terra", "sf", "tidymodels", "xgboost", "fst", "future", "doFuture")
 # invisible(sapply(pkgs, library, character.only = TRUE))
 options(width = 125)
-sf::sf_use_s2(FALSE)
 
 all_cores <- parallel::detectCores(logical = FALSE)
 
