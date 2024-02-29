@@ -4,8 +4,9 @@ source("./target-tidy/tidymodels_targets.r")
 tar_option_set(
   controller = 
   crew::crew_controller_local(
-    workers = 8,
-    name = "default"
+    workers = 24L,
+    name = "default",
+    garbage_collection = TRUE
   ),
   # crew.cluster::crew_launcher_cluster(
   #   name = "default"
@@ -27,7 +28,7 @@ list(
   ,
   tar_target(
     datsfpp,
-    preprocess_data(datsf, nsample = 2e3)
+    preprocess_data(datsf, nsample = 8e3)
   )
   ,
   tar_target(

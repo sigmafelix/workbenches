@@ -127,3 +127,13 @@ load_results <- function(file_path) {
   results <- readRDS(file_path)
   return(results)
 }
+
+
+prestofit <- function(data, modeltype = PrestoGP::VecchiaModel()) {
+  modeltype %>%
+  PrestoGP::prestogp_fit(
+    data = data,
+    formula = price ~ .,
+    ncores = all_cores
+  )
+}
