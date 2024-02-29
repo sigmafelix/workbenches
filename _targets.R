@@ -27,7 +27,7 @@ list(
   ,
   tar_target(
     datsfpp,
-    preprocess_data(datsf)
+    preprocess_data(datsf, nsample = 2e3)
   )
   ,
   tar_target(
@@ -51,7 +51,7 @@ list(
   ,
   tar_target(
     pred,
-    generate_predictions(train0, res = tarsplit)
+    generate_predictions(train0, split = tarsplit)
   )
 )
 

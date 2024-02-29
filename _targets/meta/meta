@@ -1,21 +1,21 @@
 name|type|data|command|depend|seed|path|time|size|bytes|format|repository|iteration|parent|children|seconds|warnings|error
-.Random.seed|object|af560776fbfdf3df|||||||||||||||
-all_cores|object|5535d94b1040df13|||||||||||||||
-cl|object|e9097a69dddca315|||||||||||||||
-data|stem|0c943c1b8859fe60|7525cbc3ee2c872e|ef46db3751d8e999|-2078757027||t19781.5883571884s|efe265e3f5f5ead3|674523|rds|local|vector|||2.569||
-datsf|stem|3eb1db3de422aca4|0063f624840c0f29|2130ecbef597ba90|-1255506705||t19781.5750523194s|a509d7e7c79e823c|1056726|rds|local|vector|||0.582||
-datsfpp|stem|83745096754f3662|a4ae0cf5a72740ad|4c186335bc0bb573|-122845847||t19781.5750544535s|212a016de0d0dff6|1079158|rds|local|vector|||0.007||
-generate_predictions|function|96e0497981eaafa5|||||||||||||||
+.Random.seed|object|1ccaef7179618d80|||||||||||||||
+all_cores|object|0ad96d45f570ed27|||||||||||||||
+cl|object|0524cf6e6f79bfd1|||||||||||||||
+data|stem|0c943c1b8859fe60|7525cbc3ee2c872e|ef46db3751d8e999|33550471||t19782.0453845812s|efe265e3f5f5ead3|674523|rds|local|vector|||4.31||
+datsf|stem|75fb5fb3b786a6b8|0063f624840c0f29|2130ecbef597ba90|305165727||t19782.0453909702s|3b5b9861e8d37442|1056733|rds|local|vector|||0.241||
+datsfpp|stem|0ba1787ebc8395a7|74b1ae618e807505|ef249b79fd33c87e|2117696522||t19782.0842828445s|437ec6d2cbb3c5b2|108603|rds|local|vector|||4.294||
+generate_predictions|function|19a49fc5bd4c7134|||||||||||||||
 load_data|function|a48d7a1efd05bd05|||||||||||||||
 load_results|function|8d0d11b1ff092c6d|||||||||||||||
 pkgs|object|659504f7c6f01e28|||||||||||||||
-pred|stem||09aaecf5fdddc2e5|f14b30d80d4a89a2|647799279||t19781.6176473497s||0|rds|local|vector|||0.005|Unknown or uninitialised column fit.. Unknown or uninitialised column spec.. Unknown or uninitialised column spec.. Unknown or uninitialised column spec.|EXPR must be a length 1 vector
+pred|stem|1310f155fc8b442a|6025326a112d000c|b6fd412a68d611ea|1465217005||t19782.1121280682s|c8b050990fca3d17|2184439|rds|local|vector|||8.117||
 prep_sf|function|94f32bc10eda3176|||||||||||||||
-preprocess_data|function|77d5956ccd76d0ad|||||||||||||||
-recipe_set|stem|252a9b45cfacc5d2|d5cf21d602f0717e|26e2aa2f83e5e451|-1539851697||t19781.5750554101s|db4262e5d5a3835b|296044|rds|local|vector|||0.008||
-reciping|function|5e7b74d1c8a191f4|||||||||||||||
+preprocess_data|function|f06f0b7eaaeca61e|||||||||||||||
+recipe_set|stem|bbb0deb64df5281a|d5cf21d602f0717e|052b4fd56fb257fa|73181520||t19782.1094264436s|aaef772b90612ef0|30884|rds|local|vector|||3.695||
+reciping|function|6ab2ae87118cc09c|||||||||||||||
 save_results|function|a08bfb40ccb2b843|||||||||||||||
 split_data|function|f95e614acc46b450|||||||||||||||
-tarsplit|stem|72e23395d2f3aea1|bbe96cfa0f66b8ab|9281a4b68dc1b5a1|-1252093128||t19781.6004564231s|fb125f08d594326a|21405689|rds|local|vector|||2.728|Using an external vector in selections was deprecated in tidyselect 1.1.0.ℹ Please use all_of or any_of instead.   Was  data  selectgroup   Now  data  selectall_ofgroupSee httpstidyselect.rlib.orgreferencefaqexternalvector.html.|
-train_model|function|236a5bfe76e23cf7|||||||||||||||
-train0|stem|c399afca8c8f0332|81e3d257138390af|887613fdcde9636d|-134094736||t19781.6174564784s|3f629e2a4944b1e4|235504978|rds|local|vector|||1413.53||
+tarsplit|stem|2eecca21f0ef14ae|bbe96cfa0f66b8ab|e9108d76151202a3|-1316684063||t19782.0842899279s|329f97dad000233c|2160013|rds|local|vector|||0.153|Using an external vector in selections was deprecated in tidyselect 1.1.0.ℹ Please use all_of or any_of instead.   Was  data  selectgroup   Now  data  selectall_ofgroupSee httpstidyselect.rlib.orgreferencefaqexternalvector.html.|
+train_model|function|d9f977626f3674d3|||||||||||||||
+train0|stem|3403d5a5ddce76d7|81e3d257138390af|21f3e7a0e1afeb4a|-1162926279||t19782.1119956552s|62d5339b6ea8b775|28284572|rds|local|vector|||146.884||

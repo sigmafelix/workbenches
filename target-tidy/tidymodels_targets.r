@@ -31,9 +31,10 @@ split_data <- function(data, group) {
 }
 
 # Function to preprocess the data
-preprocess_data <- function(data) {
+preprocess_data <- function(data, nsample = nrow(data)) {
     data <- data %>%
-      mutate(zip4 = substr(zipcode, 1, 4))
+      mutate(zip4 = substr(zipcode, 1, 4)) %>%
+      sample_n(nsample)
 #   data <- data %>%
 #     dplyr::mutate(
 #       dplyr::across(dplyr::where(is.numeric(.x) && names(.x) == "zipcode"), ~as.vector(scale(.x)))
@@ -45,26 +46,32 @@ preprocess_data <- function(data) {
 
 
 reciping <- function(data, xc, yc) {
+  dat <- sf::st_drop_geometry(data)
   recipes::recipe(
     formula =
       reformulate(
         response = yc,
         termlabels = xc
       ),
-    data = data
+    data = dat
   )
 }
 
 # Function to train a model
 train_model <- function(preproc, xc, yc = "price", res = NULL) {
   # Add model training code here
+  ctrl <-
+    tune::control_bayes(
+      save_workflow = TRUE,
+      parallel_over = "everything"
+    )
   parsnip::boost_tree(
     mode = "regression",
     engine = "xgboost",
     mtry = 5,
-    trees = parsnip::tune(),
+    trees = 500,
     min_n = 2,
-    tree_depth = 5,
+    tree_depth = parsnip::tune(),
     learn_rate = parsnip::tune()
   ) %>%
 #   parsnip::fit.model_spec(
@@ -75,7 +82,11 @@ train_model <- function(preproc, xc, yc = "price", res = NULL) {
 #     ),
 #     data = data
 #   ) %>%
-  tune::tune_bayes(preprocessor = preproc, resamples = res)
+  tune::tune_bayes(
+    preprocessor = preproc,
+    resamples = res,
+    control = ctrl
+  )
   # For example, linear regression, random forest, etc.
   # return(model)
 }
@@ -89,12 +100,15 @@ train_model <- function(preproc, xc, yc = "price", res = NULL) {
 # }
 
 # Function to generate predictions
-generate_predictions <- function(model, res = NULL) {
+generate_predictions <- function(model, split) {
   # Add prediction code here
-  parsnip::predict.model_fit(
-    object = model,
-    new_data = res
-  )
+  tune::fit_best(
+    x = model,
+    verbose = TRUE
+  ) %>%
+  tune::fit_resamples(
+    split,
+    control = tune::control_resamples(save_pred = TRUE))
   # For example, predict on new data
   # return(predictions)
 }
