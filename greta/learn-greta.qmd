@@ -1,0 +1,91 @@
+---
+title: "`greta` workbench"
+author: "Insang Song"
+format:
+  html:
+    embed-resources: true
+---
+
+
+```{r}
+#| label: load-packages
+#| fig.width=8, fig.height=6
+#| fig.res=300
+
+library(pacman)
+p_load(
+    greta, greta.gp, palmerpenguins, rgbif,
+    data.table, cubble, trajectories, spacetime,
+    sf, sftime,
+    future, furrr, doFuture, future.callr,
+    qs
+)
+
+sf_use_s2(FALSE)
+```
+
+
+
+```{r}
+#| label: data
+# movebank.org
+adrian <- data.table::fread("/home/felix/Downloads/Milvus_milvus_Soaring_over_Adriatic_sea.csv")
+
+doFuture::registerDoFuture()
+plan(multicore, workers = 12L)
+adrian_l <-
+    split(adrian, adrian$`individual-local-identifier`) %>%
+    furrr::future_map(.x = ., .f = ~ {
+        sftime::st_as_sftime(
+            .x,
+            coords = c("location-long", "location-lat"),
+            crs = 4326,
+            time_column_name = "timestamp"
+        )
+    }) %>%
+    furrr::future_map(.x = ., .f = ~ {
+        as(.x, "STIDF")
+    })
+adrian_tj <- lapply(adrian_l, trajectories::Track)
+adrian_tjs <- trajectories::Tracks(adrian_tj)
+class(adrian_tjs)
+plot(adrian_tjs)
+stplot(adrian_tj[[1]], attr = "")
+
+
+trajectories::avemove(adrian_tjs, timestamp = "1 day")
+trajectories::stcube(adrian_tj[[1]])
+```
+
+
+
+```{r}
+#| label: init-greta
+# greta::install_greta_deps()
+
+greta.gp::gp()
+?greta::slsqp()
+
+data(penguins)
+penguins <- penguins[complete.cases(penguins), ]
+
+f <- as_data(penguins$flipper_length_mm)
+x <- as_data(penguins$body_mass_g)
+xe <- as_data(model.matrix(~., penguins[, c(1:2, 6:8)]))
+
+b0 <- normal(0, 10)
+# coef <- greta::multivariate_normal(mean = rep(0, 8), Sigma = 3 * diag(8))
+coef <- normal(0.05, 1)
+sd <- greta::lognormal(0, 2.5)
+
+yhat <- b0 + x * coef
+distribution(f) <- normal(yhat, sd)
+
+
+mf <- model(b0, coef, sd)
+
+# requires DiagrammeR
+plot(mf)
+draws <- mcmc(mf, n_samples = 5000, n_cores = 4, warmup = 2000)
+
+```
