@@ -1,0 +1,356 @@
+---
+title: Torch on R workbench: CNN and RNN
+date: today
+output:
+  html:
+    embed-resources: true
+    toc: true
+    theme: cerulean
+    highlight: tango
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(message = FALSE, warning = FALSE)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+```{r load-pkgs}
+pkgs <- c("torch", "luz", "dplyr", "collapse")
+invisible(lapply(pkgs, require, character.only = TRUE))
+```
+
+```{r}
+set.seed(2024)
+# Load example dataset
+# x, y, and t dimensions
+ncase <- 10
+dim_x <- 80
+dim_y <- 60
+dim_t <- 100
+# outcome
+dim_z <- 1
+# covariates
+dim_u <- 5
+
+# objective: make tensors
+# 80 x 60 x 100 x 1 or 1 x 80 x 60 x 100?
+# 80 x 60 x 100 x 5 or 5 x 80 x 60 x 100?
+# concept: slicing multidimensional tensors into D-1 dimension
+# in models, mapping covariates and outcome is managed by
+# the model architecture (i.e., arguments in building blocks)
+
+# Generate spatiotemporal field
+data_z <- array(runif(ncase * dim_x * dim_y * dim_t * dim_z), dim = c(ncase, dim_x, dim_y, dim_t, dim_z))
+tensor_z <- torch_tensor(data_z, dtype = torch_float32())
+data_u <- array(runif(ncase * dim_x * dim_y * dim_t * dim_u), dim = c(ncase, dim_x, dim_y, dim_t, dim_u))
+tensor_u <- torch_tensor(data_u, dtype = torch_float32())
+
+
+
+example_dataset <- dataset(
+  
+  name = "example_dataset",
+  
+  initialize = function(ytensor, xtensor) {
+
+    self$y <- ytensor
+    self$x <- xtensor
+    
+  },
+  
+  .getitem = function(i) {
+
+     list(
+        x = self$x[, , i, ],
+        y = self$y[, , i, ]
+    )
+    
+  },
+  
+  .length = function() {
+    self$y$size()[[3]]
+  }
+ 
+)
+
+# be aware of dimensions
+tensor_zsub <- tensor_z[1, , , ,]
+tensor_usub <- tensor_u[1, , , ,]
+
+index <- seq(1, 80)
+example_dataset(
+    tensor_zsub[, , index, ],
+    tensor_usub[, , index, ]
+) |> length()
+
+
+tensors_ex_train <- example_dataset(
+    tensor_zsub[, , index, ],
+    tensor_usub[, , index, ]    
+)
+
+tloader <-
+    tensors_ex_train %>%
+    dataloader(batch_size = 10, shuffle = FALSE)
+
+flatten_rnn <- torch::nn_module(
+    "FlattenRNN",
+    initialize = function(hidden_size = 32, output_size = 1, num_layers = 5, dropout = 0.25) {
+        self$hidden_size <- hidden_size
+        self$rnn <- torch::nn_rnn(
+            input_size = dim_x * dim_y,
+            hidden_size = hidden_size,
+            nonlinearity = "relu",
+            num_layers = num_layers,
+            dropout = dropout,
+            batch_first = TRUE
+        )
+        self$linear <- torch::nn_linear(hidden_size, output_size)
+    },
+    forward = function(x, hidden) {
+        x_flattened <- torch::torch_flatten(x, start_dim = 1, end_dim = 2)
+        hidden <- self$rnn(x_flattened, hidden)[[2]]
+        output <- self$rnn(x_flattened, hidden)[[1]]
+        pred <- self$linear(output[, -1, ])
+        return(list(pred, hidden))
+    },
+    init_hidden = function() {
+        return(torch::torch_randn(1, dim_t, self$hidden_size))
+    }
+)
+
+flatten_rnn_model <- flatten_rnn()
+
+rnnfit <-
+    flatten_rnn_model() %>%
+    luz::setup(loss = nn_mse_loss(), optimizer = optim_adam) %>%
+    luz::fit(tloader, epochs = 10) 
+
+## translation of models STCausalConvNet
+SimpleRNN <- torch::nn_module(
+    "SimpleRNN",
+    initialize = function(
+        input_size,
+        hidden_size = 32,
+        output_size = 1,
+        num_layers = 1,
+        dropout = 0.25) {
+            self$hidden_size = hidden_size
+            self$rnn = torch::nn_rnn(
+                input_size = input_size,
+                hidden_size = hidden_size,
+                nonlinearity = "relu",
+                num_layers = num_layers,
+                dropout = dropout,
+                batch_first = TRUE
+            )
+            self$linear =
+                torch::nn_linear(hidden_size, output_size)
+        },
+    forward = function(x, hidden) {
+        output = self$rnn(x, hidden)[[1]]
+        hidden = self$rnn(x, hidden)[[2]]
+        pred = self$linear(output[, -1, ])
+        return(list(pred, hidden))
+    },
+    init_hidden = function(){
+        return(torch::torch_randn(1, 24, self$hidden_size))
+    }
+)
+
+
+rnnfit <-
+    SimpleRNN(input_size = 4000) %>%
+    luz::setup(loss = nn_mse_loss(), optimizer = optim_adam) %>%
+    luz::fit(tloader(batch_size = 10, shuffle = FALSE), epochs = 10)
+
+
+
+SimpleGRU <- torch::nn_module(
+    initialize = function(self, input_size, hidden_size, output_size=1, num_layers=1, dropout=0.25) {
+        super(SimpleGRU, self).__init__()
+        self$hidden_size = hidden_size
+        self$gru = nn.GRU(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            # dropout=dropout,
+            batch_first=TRUE
+        )
+        self$linear = nn.Linear(hidden_size, output_size)
+    }
+    forward = function(self, x, hidden) {
+        output, hidden = self$gru(x, hidden)
+        pred = self$linear(output[, -1, ])
+        return(pred, hidden)
+    }
+    init_hidden = function(self) {
+        return(torch::torch_randn(1, 24, self$hidden_size, pin_memory = TRUE))
+    }
+)
+
+SimpleLSTM <- torch::nn_module(
+    initialize = function(self, input_size, hidden_size, output_size=1, num_layers=1, dropout=0.25){
+        super(SimpleLSTM, self).__init__()
+        self$hidden_size = hidden_size
+        self$lstm = torch::nn_lstm(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            # dropout=dropout,
+            batch_first=TRUE
+        )
+        self$linear = torch::nn_linear(hidden_size, output_size)
+    }
+    forward = function(self, x) {
+        output, (h_n, c_n) = self$lstm(x)
+        pred = self$linear(output[, -1, ])
+        return pred
+    }
+
+    init_hidden = function(self) {
+        return torch::torch_randn(1, 24, self$hidden_size, pin_memory = TRUE)
+    }
+)
+
+TCN <- torch::nn_module(
+    initialize = function(self, input_size, output_size, num_channels, kernel_size, dropout){
+        super(TCN, self).__init__()
+        self$tcn = TemporalConvNet(input_size, num_channels, kernel_size, dropout=dropout)
+        self$linear = nn.Linear(num_channels[-1], output_size)
+    }
+    forward = function(self, x){
+        output = torch::torch_transpose(self$tcn(torch::torch_transpose(x, 1, 2)), 1, 2)
+        pred = self$linear(output[, -1, ])
+        return(pred)
+    }
+)
+
+
+
+# Define the CNN model architecture
+model <- nn_module(
+    initialize = function() {}
+    ,
+    forward = function(input) {
+    input %>%
+        nn_conv2d(1, 32, kernel_size = 3) %>%
+        nn_relu() %>%
+        nn_max_pool2d(kernel_size = 2) %>%
+        nn_conv2d(32, 64, kernel_size = 3) %>%
+        nn_relu() %>%
+        nn_max_pool2d(kernel_size = 2) %>%
+        nn_flatten() %>%
+        nn_linear(64 * 6 * 6, 128) %>%
+        nn_relu() %>%
+        nn_linear(128, 10)
+    }
+)
+
+
+# Preprocess the data
+x_train <- data$train$x
+y_train <- data$train$y
+x_test <- data$test$x
+y_test <- data$test$y
+
+# Convert data to tensors
+x_train <- torch_tensor(x_train, dtype = torch_float32) / 255
+y_train <- torch_tensor(y_train, dtype = torch_int64)
+x_test <- torch_tensor(x_test, dtype = torch_float32) / 255
+y_test <- torch_tensor(y_test, dtype = torch_int64)
+
+# Define the CNN model architecture
+model <- nn_module(
+    nn_conv2d(1, 32, kernel_size = 3),
+    nn_relu(),
+    nn_max_pool2d(kernel_size = 2),
+    nn_conv2d(32, 64, kernel_size = 3),
+    nn_relu(),
+    nn_max_pool2d(kernel_size = 2),
+    nn_flatten(),
+    nn_linear(64 * 6 * 6, 128),
+    nn_relu(),
+    nn_linear(128, 10)
+)
+
+# Define the loss function
+loss_fn <- nn_cross_entropy_loss()
+
+# Define the optimizer
+optimizer <- optim_sgd(model$parameters(), lr = 0.01)
+
+# Train the model
+for (epoch in 1:10) {
+    for (batch in 1:num_batches) {
+        # Get the batch data
+        batch_data <- get_batch_data(batch)
+        
+        # Zero the gradients
+        optimizer$zero_grad()
+        
+        # Forward pass
+        output <- model(batch_data$x)
+        
+        # Compute the loss
+        loss <- loss_fn(output, batch_data$y)
+        
+        # Backward pass
+        loss$backward()
+        
+        # Update the weights
+        optimizer$step()
+    }
+}
+
+
+```
+
+```{r}
+library(torch)
+
+# Define the CNN model architecture
+model <- nn_module(
+    nn_conv2d(1, 32, kernel_size = 3),
+    nn_relu(),
+    nn_max_pool2d(kernel_size = 2),
+    nn_conv2d(32, 64, kernel_size = 3),
+    nn_relu(),
+    nn_max_pool2d(kernel_size = 2),
+    nn_flatten(),
+    nn_linear(64 * 6 * 6, 128),
+    nn_relu(),
+    nn_linear(128, 10)
+)
+
+# Define the loss function
+loss_fn <- nn_cross_entropy_loss()
+
+# Define the optimizer
+optimizer <- optim_sgd(model$parameters(), lr = 0.01)
+
+# Train the model
+for (epoch in 1:10) {
+    for (batch in 1:num_batches) {
+        # Get the batch data
+        batch_data <- get_batch_data(batch)
+        
+        # Zero the gradients
+        optimizer$zero_grad()
+        
+        # Forward pass
+        output <- model(batch_data$x)
+        
+        # Compute the loss
+        loss <- loss_fn(output, batch_data$y)
+        
+        # Backward pass
+        loss$backward()
+        
+        # Update the weights
+        optimizer$step()
+    }
+}
+```
