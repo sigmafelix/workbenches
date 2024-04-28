@@ -1,0 +1,100 @@
+---
+title: Brulee examples
+date: today
+output:
+  html:
+    embed-resources: true
+    toc: true
+    theme: cerulean
+    highlight: tango
+    number_sections: true
+---
+
+```{r example-webpage}
+library(brulee)
+library(tidymodels)
+library(torch)
+library(brulee)
+data(ames, package = "modeldata")
+
+ames$Sale_Price <- log10(ames$Sale_Price)
+
+set.seed(122)
+in_train <- sample(1:nrow(ames), 2000)
+ames_train <- ames[ in_train,]
+ames_test  <- ames[-in_train,]
+
+
+# Using matrices
+set.seed(1)
+fit <-
+  brulee_mlp(x = as.matrix(ames_train[, c("Longitude", "Latitude")]),
+             y = ames_train$Sale_Price, penalty = 0.10)
+
+# Using recipe
+library(workflow)
+library(recipes)
+library(tune)
+
+# procedure:
+# model definition
+# recipe definition
+# add both to an empty workflow
+# define tune control
+# tune the workflow
+
+brulee_md <- mlp(
+    hidden_units = tune(),
+    learn_rate = tune(),
+    activation = tune(),
+    epochs = 1000L
+    ) %>%
+    set_engine("brulee") %>%
+    set_mode("regression")
+
+ames_rec <-
+  recipe(Sale_Price ~ Bldg_Type + Neighborhood + Year_Built + Gr_Liv_Area +
+         Full_Bath + Year_Sold + Lot_Area + Central_Air + Longitude + Latitude,
+         data = ames_train) %>%
+   # Transform some highly skewed predictors
+   step_BoxCox(Lot_Area, Gr_Liv_Area) %>%
+   # Lump some rarely occurring categories into "other"
+   step_other(Neighborhood, threshold = 0.05)  %>%
+   # Encode categorical predictors as binary.
+   step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+   # Add an interaction effect:
+   step_interact(~ starts_with("Central_Air"):Year_Built) %>%
+   step_zv(all_predictors()) %>%
+   step_normalize(all_numeric_predictors())
+
+ames_wflow <- workflow() %>%
+    add_model(brulee_md) %>%
+    add_recipe(ames_rec)
+
+
+# set.seed(2)
+
+# fit <- brulee_mlp(ames_rec, data = ames_train, hidden_units = tune(),
+#                   activation = "relu", #learning_rate = 0.1,
+#                   optimizer = "SGD", momentum = tune(), epochs = 1000L,
+#                   dropout = tune(), rate_schedule = "cyclic", step_size = 4)
+
+ctrl <- control_bayes(verbose = TRUE)
+
+set.seed(1403)
+fit_by <-
+  ames_wflow %>%
+  tune_bayes(
+    resamples = rsample::clustering_cv(ames_train, names(ames_train)[2:25], 5),
+    metrics = yardstick::metric_set(rmse, mae),
+    iter = 25,
+    control = ctrl
+  )
+
+
+library(yardstick)
+predict(fit, ames_test) %>%
+  bind_cols(ames_test) %>%
+  rmse(Sale_Price, .pred)
+
+```
