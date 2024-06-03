@@ -1,0 +1,139 @@
+---
+title: My Spatial Data Format Bench
+author: Insang Song
+output:
+    quarto::html_document:
+        theme: cerulean
+--
+
+# Introduction
+- In recent years, alternative geospatial formats that are not based on the shapefile have been developed. A new _de facto_ standard is GeoPackage, which is a SQLite database storing vector and raster data.
+- I recently came across several new formats, `Geoparquet`, `feather`, `FlatGeoBuf`, and writing capabilities for `OpenGDB`.
+- Here I want to compare the read/write performance and file size of these formats with GeoPackage.
+
+```{r}
+pkgs <- c("terra", "sf", "sfarrow", "bench", "fs")
+if (!all(pkgs %in% installed.packages())) {
+  install.packages(pkgs[!pkgs %in% installed.packages()])
+}
+invisible(
+  vapply(
+    pkgs,
+    require, logical(1),
+    quietly = TRUE, character.only = TRUE
+  )
+)
+options(sf_use_s2 = FALSE)
+```
+
+
+```
+# terra 1.7.78
+# Linking to GEOS 3.12.1, GDAL 3.8.4, PROJ 9.3.1; sf_use_s2() is TRUE
+```
+
+# Benchmark
+- Using 2010 US Census Tract data, I will compare the read/write performance and file size of GeoPackage, GeoParquet, Feather, FlatGeoBuf, and OpenGDB.
+- Results are based on a single run and may vary depending on the system environment (i.e., GDAL version).
+- Results favor geofeather for write and read performance, and the file size of geofeather is the smallest among the file-based export.
+- For hardware, I used ThinkPad P14s Gen 4 with AMD Ryzen 7 7840U and Samsung 980 Pro NVMe SSD.
+
+```{r bench}
+
+targdir <- tempdir()
+base_file <- file.path("~", "Documents", "USCensusArea", "US_tract_2010.shp")
+
+bench::mark(
+  # GeoPackage
+  {
+    gpkg_file <- file.path(targdir, "us_tracts_2010.gpkg")
+    sf::st_write(sf::st_read(base_file), gpkg_file, append = FALSE)
+  },
+  # GeoParquet
+  {
+    gpq_file <- file.path(targdir, "us_tracts_2010.gpq")
+    sfarrow::st_write_parquet(sf::st_read(base_file), gpq_file)
+  },
+  # Feather
+  {
+    fth_file <- file.path(targdir, "us_tracts_2010.fth")
+    sfarrow::st_write_feather(sf::st_read(base_file), fth_file)
+  },
+  # FlatGeoBuf
+  {
+    fgb_file <- file.path(targdir, "us_tracts_2010.fgb")
+    sf::st_write(sf::st_read(base_file), fgb_file, append = FALSE)
+  },
+  # OpenGDB
+  {
+    gdb_file <- file.path(targdir, "us_tracts_2010.gdb")
+    sf::st_write(sf::st_read(base_file), gdb_file, append = FALSE)
+  },
+  iterations = 1,
+  check = FALSE
+)
+
+# A tibble: 5 × 13
+#   expression      min median `itr/sec` mem_alloc `gc/sec` n_itr  n_gc total_time
+#   <bch:expr>   <bch:> <bch:>     <dbl> <bch:byt>    <dbl> <int> <dbl>   <bch:tm>
+# 1 "{ gpkg_fil… 15.38s 15.38s    0.0650    1.99GB    0.260     1     4     15.38s
+# 2 "{ gpq_file…  8.07s  8.07s    0.124     1.99GB    0.248     1     2      8.07s
+# 3 "{ fth_file…   7.8s   7.8s    0.128     1.99GB    0.513     1     4       7.8s
+# 4 "{ fgb_file…    17s    17s    0.0588    1.99GB    0.235     1     4        17s
+# 5 "{ gdb_file… 10.43s 10.43s    0.0959    1.99GB    0.479     1     5     10.43s
+# ℹ 4 more variables: result <list>, memory <list>, time <list>, gc <list>
+
+# 11 …us_tracts_2010.fgb file  690.74M
+# 12 …us_tracts_2010.fth file  647.46M
+# 13 …us_tracts_2010.gdb dire…    263M
+# 14 …s_tracts_2010.gpkg file   733.9M
+# 15 …us_tracts_2010.gpq file  659.21M
+
+
+```
+
+
+```{r read}
+ench::mark(
+  # GeoPackage
+  {
+    gpkg_file <- file.path(targdir, "us_tracts_2010.gpkg")
+    sf::st_read(gpkg_file)
+  },
+  # GeoParquet
+  {
+    gpq_file <- file.path(targdir, "us_tracts_2010.gpq")
+    sfarrow::st_read_parquet(gpq_file)
+  },
+  # Feather
+  {
+    fth_file <- file.path(targdir, "us_tracts_2010.fth")
+    sfarrow::st_read_feather(fth_file)
+  },
+  # FlatGeoBuf
+  {
+    fgb_file <- file.path(targdir, "us_tracts_2010.fgb")
+    sf::st_read(fgb_file)
+  },
+  # OpenGDB
+  {
+    gdb_file <- file.path(targdir, "us_tracts_2010.gdb")
+    sf::st_read(gdb_file)
+  },
+  iterations = 1,
+  check = FALSE
+)
+#   expression      min median `itr/sec` mem_alloc `gc/sec` n_itr  n_gc total_time
+#   <bch:expr>    <bch> <bch:>     <dbl> <bch:byt>    <dbl> <int> <dbl>   <bch:tm>
+# 1 "{ gpkg_file… 3.64s  3.64s     0.275    1.33GB    1.37      1     5      3.64s
+# 2 "{ gpq_file … 3.06s  3.06s     0.327    1.32GB    0.980     1     3      3.06s
+# 3 "{ fth_file … 1.37s  1.37s     0.730    1.32GB    0.730     1     1      1.37s
+# 4 "{ fgb_file … 3.02s  3.02s     0.331    1.33GB    0.661     1     2      3.02s
+# 5 "{ gdb_file … 3.69s  3.69s     0.271    1.33GB    1.08      1     4      3.69s
+
+```
+
+
+```{r cleanup}
+unlink(targdir, recursive = TRUE)
+```
