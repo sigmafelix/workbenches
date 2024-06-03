@@ -83,18 +83,18 @@ bench::mark(
 # 5 "{ gdb_file… 10.43s 10.43s    0.0959    1.99GB    0.479     1     5     10.43s
 # ℹ 4 more variables: result <list>, memory <list>, time <list>, gc <list>
 
-# 11 …us_tracts_2010.fgb file  690.74M
-# 12 …us_tracts_2010.fth file  647.46M
-# 13 …us_tracts_2010.gdb dire…    263M
 # 14 …s_tracts_2010.gpkg file   733.9M
 # 15 …us_tracts_2010.gpq file  659.21M
+# 12 …us_tracts_2010.fth file  647.46M
+# 11 …us_tracts_2010.fgb file  690.74M
+# 13 …us_tracts_2010.gdb dire…    263M
 
 
 ```
 
 
 ```{r read}
-ench::mark(
+bench::mark(
   # GeoPackage
   {
     gpkg_file <- file.path(targdir, "us_tracts_2010.gpkg")
@@ -136,4 +136,15 @@ ench::mark(
 
 ```{r cleanup}
 unlink(targdir, recursive = TRUE)
+```
+
+
+## Notes
+- Recent GDAL versions support Arrow/Feather format, but the driver is not available in the pre-built version in Ubuntu 22.04. Some other distros seem to have the driver. `sfarrow` dependency is required to use `.feather` data format.
+- Another caveat is that `sfarrow` does not seem to support the spatial filtering upon loading the dataset.
+
+```{r, eval=FALSE}
+# not run
+fth_file <- file.path(targdir, "us_tracts_2010.arrows")
+sf::st_write(sf::st_read(base_file), fth_file)
 ```
