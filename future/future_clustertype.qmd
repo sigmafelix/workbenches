@@ -1,0 +1,147 @@
+---
+title: Performance comparison between future cluster types
+date: 2024-06-19
+author: Insang Song
+output:
+  html:
+    embed-resources: true
+---
+
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+pkgs <- c("parallel", "future", "terra", "sf", "Rmpi", "future.apply", "future.callr", "future.apply", "microbenchmark")
+invisible(vapply(pkgs, require, logical(1), character.only = TRUE, quietly = TRUE))
+
+sf_use_s2(FALSE)
+```
+
+
+```{r}
+eco3 <- "/home/felix/Documents/us_eco_l3_state_boundaries/us_eco_l3_state_boundaries.shp"
+zcta5 <- "/home/felix/Documents/USCensusArea/US_zcta_2010.shp"
+
+usext <- c(xmin = -126, ymin = 22, xmax = -64, ymax = 52)
+usext <- st_bbox(usext, crs = "EPSG:4326")
+usextp <- st_as_sfc(usext)
+
+eco3sf <- st_read(eco3) |>
+  st_transform("EPSG:4326") |>
+  _[usextp, , op = st_intersects]
+zcta5sf <- st_read(zcta5) |>
+  st_transform("EPSG:4326") |>
+  _[usextp, , op = st_intersects]
+
+zcta5sfk <- zcta5sf[1:1000,]
+
+```
+
+
+```{r future-mpi, eval = FALSE}
+## mpirun -oversubscribe -np 1 R --vanilla
+## Then it runs
+cl <- parallel::makeCluster(type = "MPI", 8)
+
+# snow::closeNode(cl)
+plan(cluster, workers = cl)
+gk <- vector("list", length = 1e3L)
+
+# system.time(
+# ecozcta <-
+#   future::future(
+#     {
+#       for (i in seq_len(nrow(zcta5sfk))) {
+#         gk[[i]] <- st_intersection(zcta5sfk[i, ], eco3sf)
+#       }
+#     },
+#     seed = TRUE
+#   )
+# )
+# system.time(gx <- future::value(ecozcta))
+
+# this code hangs 30+ mins. Halted.
+microbenchmark::microbenchmark(
+ecozctal <-
+  future.apply::future_lapply(
+    seq_len(1e3L),
+    function(x) {
+      st_intersection(zcta5sfk[x, ], eco3sf)
+    },
+    future.seed = TRUE
+  ),
+  times = 10L
+)
+# zcta
+# 142 sec
+
+parallel::stopCluster(cl)
+
+```
+
+
+
+```{r future-multicore}
+plan(multicore, workers = 8)
+
+microbenchmark::microbenchmark(
+ecozctalc <-
+  future.apply::future_lapply(
+    seq_len(1e3L),
+    function(x) {
+      sf_use_s2(FALSE)
+      st_intersection(zcta5sfk[x, ], eco3sf)
+    },
+    future.seed = TRUE
+  )
+)
+
+# 26 sec
+
+
+```
+
+
+```{r future-multisession}
+plan(multisession, workers = 8)
+
+system.time(
+ecozctalc <-
+  future.apply::future_lapply(
+    seq_len(1e3L),
+    function(x) {
+      sf_use_s2(FALSE)
+      st_intersection(zcta5sfk[x, ], eco3sf)
+    },
+    future.seed = TRUE
+  )
+)
+# 27.5 sec
+
+
+```
+
+
+```{r future-callr}
+plan(callr, workers = 8)
+
+system.time(
+ecozctalr <-
+  future.apply::future_lapply(
+    seq_len(1e3L),
+    function(x) {
+      sf_use_s2(FALSE)
+      st_intersection(zcta5sfk[x, ], eco3sf)
+    },
+    future.seed = TRUE
+  )
+)
+# 28.96 sec
+
+
+```
+
