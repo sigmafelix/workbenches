@@ -1,0 +1,159 @@
+---
+title: "Raster-vector overlay: tabulation"
+author: Insang Song
+date: 2024-08-14
+format:
+  html:
+    highlight: pygments
+    toc: true
+---
+
+
+# Motivation
+- A state-of-the-art raster-vector overlay methods provided in `exactextractr` and `terra` are a bit slow in categorical rasters.
+- This notebook demonstrates an alternative way to perform categorical raster frequency tabulation with `collapse` on top of `exactextractr` and `terra`.
+
+
+# Data
+- National Land Cover Database (NLCD) 2021
+- US counties in NC 2020
+- US Census Block Group in NC 2020
+
+
+# Approach
+- Use `exactextractr` to extract raster values to bare `data.frame` then tabulate with `collapse::qtab()`
+
+
+# Code
+
+```{r}
+#| title: packages
+
+library(sf)
+library(terra)
+library(exactextractr)
+library(collapse)
+library(tigris)
+options(sf_use_s2 = FALSE)
+
+```
+
+
+```{r}
+#| title: data
+options(use_tigris_cache = TRUE)
+nccounties <- tigris::counties("NC", year = 2020)
+ncbgroups <- tigris::block_groups("NC", year = 2020)
+
+nlcd <- terra::rast(
+  file.path("../../..", "Downloads", "nlcd_2021_land_cover_l48_20230630", "nlcd_2021_land_cover_l48_20230630.img")
+)
+
+# reproject
+nccounties <- st_transform(nccounties, crs = terra::crs(nlcd))
+ncbgroups <- st_transform(ncbgroups, crs = terra::crs(nlcd))
+
+# random points
+states20 <- tigris::states(year = 2020)
+states_excl <- c("02", "15", "60", "66", "68", "69", "72", "78")
+states20s <- states20[!states20$STATEFP %in% states_excl, ]
+states20s <- st_transform(states20s, crs = terra::crs(nlcd))
+
+states_rps <- st_sample(states20s, 1000)
+states_rpsb <- st_buffer(states_rps, 50000)
+
+```
+
+
+```{r}
+#| title: extract with exactextractr
+
+system.time(
+    nc_counties_extract <- exact_extract(nlcd, nccounties, fun = "frac")
+)
+system.time(
+    nc_bgroups_extract <- exact_extract(nlcd, ncbgroups, fun = "frac")
+)
+system.time(
+    rpb_extract <- exact_extract(nlcd, states_rpsb, fun = "frac")
+)
+```
+
+
+`terra` case is too slow to see the result in this notebook. Therefore, we will skip the case here.
+
+```{r}
+#| title: tabulation
+#| eval: false
+
+nccountiest <- terra::vect(nccounties)
+ncbgroupst <- terra::vect(ncbgroups)
+states_rpsbt <- terra::vect(states_rpsb)
+
+
+system.time(
+    nc_counties_terra <- extract(nlcd, nccountiest, fun = table, exact = TRUE)
+)
+system.time(
+    nc_bgroups_terra <- extract(nlcd, ncbgroupst, fun = table, exact = TRUE)
+)
+system.time(
+    rpb_terra <- extract(nlcd, states_rpsbt, fun = table, exact = TRUE)
+)
+
+```
+
+The bare `data.frame` is larger than the summary table. It seems like `exactextractr` processes each feature at a time. The last case using buffer polygons crashes even with 32GB memory (10+ GB free).
+
+```{r}
+#| title: bare data.frame
+#| 
+
+system.time(
+    nc_counties_extracto <- exact_extract(nlcd, nccounties)
+)
+system.time(
+    nc_bgroups_extracto <- exact_extract(nlcd, ncbgroups)
+)
+system.time(
+    rpb_extracto <- exact_extract(nlcd, states_rpsb)
+)
+
+```
+
+
+## Row-wise tabulation
+
+```{r}
+#| title: row-wise tabulation
+library(future)
+library(future.apply)
+future::plan(future::multicore, workers = 8L)
+
+qex <- function(ras, sf, q = 100, fun = "frac") {
+#   qex_res <- vector("list", length = nrow(sf))
+
+  qex_res <- future.apply::future_Map(
+    function(i) {
+        end <- min(i + q - 1, nrow(sf))
+        ex <- exact_extract(ras, sf[i:end, , drop = FALSE])[[1]]
+        qex_res[i:end] <- lapply(ex, function(x) collapse::fsum(x$coverage_fraction, x$value))
+    }, seq(1, nrow(sf), q))
+
+  return(qex_res)
+}
+
+system.time(
+    nc_counties_qex <- qex(nlcd, nccounties)
+)
+system.time(
+    nc_bgroups_qex <- qex(nlcd, ncbgroups)
+)
+system.time(
+    rpb_qex <- qex(nlcd, sf::st_as_sf(states_rpsb))
+)
+
+``` 
+
+
+Perhaps the slowness comes from the data size that should be handled by `exactextractr`. Extracting `data.frame` to summarize with `collapse` took longer time than doing summary in `exactextractr`. C++ level parallelization might be beneficial to speed up the process, which is beyond of this document.
