@@ -25,6 +25,13 @@ Midtro
 ===
 - Legacy of presentations in proprietary software: cue, animation, transition effect, etc.
 
+```python
+import pandas as pd
+import geopandas as gpd
+
+gdf = gpd.read_file("nc.gpkg")
+```
+
 <!-- end_slide -->
 
 
