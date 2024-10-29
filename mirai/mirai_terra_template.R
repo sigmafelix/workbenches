@@ -24,7 +24,7 @@ st_crs(rrs) <- st_crs(rps) <- "OGC:CRS84"
 st_extract(rrs, at = rps)
 st_crs(rbs) <- "OGC:CRS84"
 
-mirai::daemons(4, dispatcher = "process")
+mirai::daemons(8, dispatcher = "process")
 
 # case 1. chunking, local load
 chunk_size <- 1000L
@@ -38,7 +38,7 @@ test_mm <- mirai::mirai_map(
     # todo: confirm whether package loading is required
     library(terra)
     library(sf)
-    library(stars)
+    # library(stars)
     library(exactextractr)
 	sf::sf_use_s2(FALSE)
 
@@ -58,6 +58,10 @@ test_mm <- mirai::mirai_map(
   },
   .args = list(vec = rbs, ras = ff)
 )
+tictoc::tic()
+test_mm[.progress]
+tictoc::toc()
+# 141.167 sec
 
 system.time(
   single <- exactextractr::exact_extract(
@@ -83,13 +87,13 @@ test_mm2 <- mirai::mirai_map(
     # todo: confirm whether package loading is required
     library(terra)
     library(sf)
-    library(stars)
+    # library(stars)
     library(exactextractr)
 	sf::sf_use_s2(FALSE)
 
 	ras <- terra::rast(ras)
-    vec <- terra::vect(vec)
-    vec <- vec[rowindex, ]
+  vec <- terra::vect(vec)
+  vec <- vec[rowindex, ]
 	geox <- sf::st_as_sf(vec)
 
     xk <-
@@ -105,5 +109,7 @@ test_mm2 <- mirai::mirai_map(
   },
   .args = list(vec = vfile, ras = ff)
 )
-
+tictoc::tic()
 test_mm2[.progress]
+tictoc::toc()
+# 141.986 sec
