@@ -32,6 +32,9 @@ orig_vec <- seq_len(nrow(rbs))
 chunked <- ceiling(orig_vec / chunk_size)
 
 chunked_l <- split(orig_vec, chunked)
+
+
+# Mirai_Map 1
 test_mm <- mirai::mirai_map(
   .x = chunked_l,
   .f = function(rowindex, vec, ras, ...) {
@@ -113,3 +116,86 @@ tictoc::tic()
 test_mm2[.progress]
 tictoc::toc()
 # 141.986 sec
+
+
+## comparison with future
+library(future)
+library(future.apply)
+
+
+# case 2. filepath reference
+vfile <- file.path(tempdir(), "vecexport.gpkg")
+sf::st_write(rbs, vfile, append = FALSE)
+future::plan(future::multicore, workers = 8)
+
+
+tictoc::tic()
+test_future <- future_Map(
+  f = function(rowindex, vec, ras, ...) {
+    # todo: confirm whether package loading is required
+    library(terra)
+    library(sf)
+    # library(stars)
+    library(exactextractr)
+	sf::sf_use_s2(FALSE)
+
+	ras <- terra::rast(ras)
+  vec <- terra::vect(vec)
+  vec <- vec[rowindex, ]
+	geox <- sf::st_as_sf(vec)
+
+    xk <-
+      exactextractr::exact_extract(
+        x = ras,
+        y = geox,
+        fun = "mean",
+        force_df = TRUE,
+        progress = FALSE,
+        max_cells_in_memory = 1e7
+      )
+    return(xk)
+  },
+  chunked_l,
+  vec = vfile,
+  ras = ff
+)
+tictoc::toc()
+# 135.713 sec
+
+
+future::plan(future::multisession, workers = 8)
+
+
+tictoc::tic()
+test_future <- future_Map(
+  f = function(rowindex, vec, ras, ...) {
+    # todo: confirm whether package loading is required
+    library(terra)
+    library(sf)
+    # library(stars)
+    library(exactextractr)
+	sf::sf_use_s2(FALSE)
+
+	ras <- terra::rast(ras)
+  vec <- terra::vect(vec)
+  vec <- vec[rowindex, ]
+	geox <- sf::st_as_sf(vec)
+
+    xk <-
+      exactextractr::exact_extract(
+        x = ras,
+        y = geox,
+        fun = "mean",
+        force_df = TRUE,
+        progress = FALSE,
+        max_cells_in_memory = 1e7
+      )
+    return(xk)
+  },
+  chunked_l,
+  vec = vfile,
+  ras = ff
+)
+tictoc::toc()
+# 152.715 sec
+# 7.1% gain
