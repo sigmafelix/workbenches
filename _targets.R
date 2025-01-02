@@ -1,17 +1,31 @@
 library(targets)
+library(tarchetypes)
 source("./target-tidy/tidymodels_targets.r")
 
-tar_option_set(
-  controller = 
+crew_local_24 <-
   crew::crew_controller_local(
+    name = "local-24",
     workers = 24L,
-    name = "default",
     garbage_collection = TRUE
-  ),
-  # crew.cluster::crew_launcher_cluster(
-  #   name = "default"
-  # ),
-  packages = c("data.table", "dplyr", "terra", "sf", "tidymodels", "parallel", "xgboost", "fst", "future", "doFuture", "crew", "crew.cluster"),
+  )
+
+crew_local_08 <-
+  crew::crew_controller_local(
+    name = "local-8",
+    workers = 8L,
+    garbage_collection = TRUE
+  )
+
+
+tar_option_set(
+  controller =
+    crew::crew_controller_group(
+      crew_local_24,
+      crew_local_08
+    ),
+  storage = "worker",
+  format = "qs",
+  packages = c("data.table", "dplyr", "terra", "sf", "tidymodels", "parallel", "xgboost", "fst", "qs2", "crew", "crew.cluster", "duckdb"),
 )
 
 ## target pipeline
@@ -20,6 +34,11 @@ list(
     data,
     fst::read_fst(file.path("target-tidy", "kinghouse.fst"))
   )
+  # ,
+  # tar_target(
+  #   data_duck,
+
+  # )
   ,
   tar_target(
     datsf,
