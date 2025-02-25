@@ -1,0 +1,102 @@
+---
+title: "Raster-vector overlay with geowombat: tabulation"
+author: Insang Song
+date: 2025-02-25
+format:
+  html:
+    highlight: pygments
+    toc: true
+---
+
+## Disclaimer
+- 
+
+
+
+## Geowombat
+```{python}
+!pip install git+https://github.com/jgrss/geowombat
+```
+
+
+```{python}
+import geopandas as gpd
+import pandas as pd
+import numpy as np
+import geowombat as gw
+from shapely.geometry import mapping
+from rasterio.mask import mask
+import re
+
+def calculate_nlcd(raster_path, locs_gdf, locs_id, radius=1000, mode="terra"):
+    """
+    Calculate NLCD Land Cover Covariates.
+    
+    Parameters
+    ----------
+    raster_path : str
+        Path to the NLCD raster file.
+    locs_gdf : geopandas.GeoDataFrame
+        GeoDataFrame containing point geometries and a unique identifier column.
+    locs_id : str
+        Column name in locs_gdf that uniquely identifies each location.
+    radius : float, optional
+        Radius (in same units as the raster CRS) for buffering the points (default is 1000).
+    mode : str, optional
+        Extraction mode; currently only 'terra' mode is implemented using all-touched extraction.
+    
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with the location identifier and computed proportion (ratio) of each NLCD class.
+        Column names follow the pattern 'LDU_<class>_0_<radius>'.
+    """
+    with gw.open(raster_path) as src:
+        #nodata = src.data.nodatavals[0]
+        
+        # Reproject locs if necessary
+        if locs_gdf.crs != src.crs:
+            locs_gdf = locs_gdf.to_crs(src.crs)
+        
+        # Buffer the points if radius > 0
+        if radius > 0:
+            locs_gdf = locs_gdf.copy()
+            locs_gdf['geometry'] = locs_gdf.geometry.buffer(radius)
+        
+        prop_list = []
+        prop_list = src.gw.extract(
+            locs_gdf, band_names  = src.band.values.tolist()
+        )
+        # for idx, row in locs_gdf.iterrows():
+        #     geom = [mapping(row.geometry)]
+        #     try:
+        #         out_image, out_transform = mask(src.data, geom, crop=True, all_touched=True)
+        #     except Exception as e:
+        #         print(f"Error extracting for {row[locs_id]}: {e}")
+        #         continue
+            # Assume single band extraction
+            # values = out_image[0]
+            # values = values[values != nodata]
+            # if values.size == 0:
+            #     continue
+            # unique, counts = np.unique(values, return_counts=True)
+            # proportions = counts / counts.sum()
+            # props = {f"LDU_{int(u)}_0_{int(radius):05d}": p for u, p in zip(unique, proportions)}
+            # props[locs_id] = row[locs_id]
+            # prop_list.append(props)
+        result_df = pd.DataFrame(prop_list)
+    return result_df
+
+# define file paths
+raster_path = "/mnt/d/chopin-bench/Annual_NLCD_LndCov_2021_CU_C1V0.tif"
+gdfbase = "/mnt/d/chopin-bench/tlgdb_2024_a_us_substategeo.gdb"
+gdf = gpd.read_file(gdfbase, layer = "County")
+gdfsub = gdf[gdf["GEOID"].apply(lambda x: re.match("^01", x) is not None)]
+gdfsub = gdfsub.to_crs("EPSG:8858")
+
+# Run the Python function on the GeoDataFrame.
+# %timeit
+result_py = calculate_nlcd(raster_path, gdfsub, locs_id="GEOID", radius=0)
+print(result_py)
+
+```

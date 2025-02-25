@@ -156,4 +156,46 @@ system.time(
 ``` 
 
 
-Perhaps the slowness comes from the data size that should be handled by `exactextractr`. Extracting `data.frame` to summarize with `collapse` took longer time than doing summary in `exactextractr`. C++ level parallelization might be beneficial to speed up the process, which is beyond of this document.
+Perhaps the slowness comes from the data size that should be handled by `exactextractr`. Extracting `data.frame` to summarize with `collapse` took longer time than doing summary in `exactextractr`. C++ level parallelization might be beneficial to speed up the process, which is beyond the scope of this document.
+
+
+## Added 2025-02-25
+
+
+```{r}
+#| title: row-wise mask-freq sequence
+
+library(terra)
+library(future)
+library(future.apply)
+
+raster_path <- "/mnt/d/chopin-bench/Annual_NLCD_LndCov_2021_CU_C1V0.tif"
+gdfbase <- "/mnt/d/chopin-bench/tlgdb_2024_a_us_substategeo.gdb"
+raster <- terra::rast(raster_path)
+gdf <- terra::vect(gdfbase, layer = "County")
+gdf <- terra::project(gdf, terra::crs(raster))
+gdfsub <- gdf[grep("^(02|15|68|72|66|69|60|78)", gdf$GEOID, invert = TRUE), ]
+
+future::plan(future::multicore, workers = 8L)
+
+qex <- function(ras, sf) {
+
+  qex_res <- future.apply::future_Map(
+    function(i) {
+        ex <- terra::crop(ras, sf[i,], touches = TRUE)
+        ex <- terra::freq(ex, wide = TRUE)
+        return(ex)
+    }, seq_len(nrow(sf)))
+
+  return(qex_res)
+}
+
+system.time(
+    qres <- qex(raster, gdfsub)
+)
+
+system.time(
+    us_counties_extracto <- exactextractr::exact_extract(raster, sf::st_as_sf(gdfsub), fun = "frac")
+)
+
+```
