@@ -1,0 +1,45 @@
+---
+title: "Spatial weight matrix generation workbench"
+author: "Insang Song"
+date: "2025-10-22"
+---
+
+```{r load packages}
+library(spdep)
+library(spatialreg)
+library(sf)
+sf_use_s2(FALSE)
+
+file_path = "/mnt/d/swm-work/bnd_all_00_2020_4Q/bnd_sigungu_00_2020_4Q.shp"
+sf_data <- st_read(file_path)
+nb_queen <- poly2nb(sf_data, queen=TRUE)
+listw_queen <- nb2listw(nb_queen, style="W", zero.policy=TRUE)
+plot(sf_data$geometry, border='lightgrey', main='Queen Contiguity Weights')
+plot(listw_queen, st_coordinates(st_centroid(sf_data)), add=TRUE, col='red')
+
+```
+
+
+
+```{python load pkgs}
+import geopandas as gpd
+from libpysal import weights
+from libpysal import graph
+import os
+import glob
+
+file_path = "/mnt/d/swm-work/bnd_all_00_2020_4Q/bnd_sigungu_00_2020_4Q.shp"
+gdf = gpd.read_file(file_path)
+gdf_w = weights.Queen.from_dataframe(gdf)
+gdf_g = graph.Graph.from_W(gdf_w)
+
+
+gdf_g.plot(gdf)
+
+# plot the links
+fig, ax = gdf.plot(figsize=(10, 10), color='white', edgecolor='black')
+gdf_w.plot(ax=ax, color='red')
+
+
+
+```
