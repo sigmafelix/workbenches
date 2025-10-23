@@ -10,12 +10,29 @@ library(spatialreg)
 library(sf)
 sf_use_s2(FALSE)
 
-file_path = "/mnt/d/swm-work/bnd_all_00_2020_4Q/bnd_sigungu_00_2020_4Q.shp"
-sf_data <- st_read(file_path)
-nb_queen <- poly2nb(sf_data, queen=TRUE)
-listw_queen <- nb2listw(nb_queen, style="W", zero.policy=TRUE)
-plot(sf_data$geometry, border='lightgrey', main='Queen Contiguity Weights')
-plot(listw_queen, st_coordinates(st_centroid(sf_data)), add=TRUE, col='red')
+
+basepath = "/mnt/d/swm-work"
+file_path_pattern <- "bnd_sigungu_00_\\d{4}_4Q.shp"
+files <- list.files(path=basepath, pattern=file_path_pattern, full.names=TRUE, recursive = TRUE)
+
+oldpar <- par(mfrow = c(1,1))
+par(mfrow = c(4,4))
+
+lapply(files, function(file_path) {
+  sf_data <- st_read(file_path)
+  nb_queen <- poly2nb(sf_data, queen=TRUE)
+  yr <- regmatches(basename(file_path), regexpr("\\d{4}", basename(file_path)))[1]
+  listw_queen <- nb2listw(nb_queen, style="B", zero.policy=TRUE)
+  plot(sf_data$geometry, border='lightgrey', main=paste('Queen Contiguity Weights -', yr, " ", basename(file_path)))
+  plot(listw_queen, st_coordinates(st_centroid(sf_data)), add=TRUE, col='red')
+})
+
+par(oldpar)
+# sf_data <- st_read(file_path)
+# nb_queen <- poly2nb(sf_data, queen=TRUE)
+# listw_queen <- nb2listw(nb_queen, style="W", zero.policy=TRUE)
+# plot(sf_data$geometry, border='lightgrey', main='Queen Contiguity Weights')
+# plot(listw_queen, st_coordinates(st_centroid(sf_data)), add=TRUE, col='red')
 
 ```
 
