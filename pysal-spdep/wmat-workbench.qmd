@@ -12,17 +12,24 @@ sf_use_s2(FALSE)
 
 
 basepath = "/mnt/d/swm-work"
-file_path_pattern <- "bnd_sigungu_00_\\d{4}_4Q.shp"
+file_path_pattern <- "bnd_sigungu_00_\\d{4}(|_4Q).shp"
 files <- list.files(path=basepath, pattern=file_path_pattern, full.names=TRUE, recursive = TRUE)
 
 oldpar <- par(mfrow = c(1,1))
-par(mfrow = c(4,4))
+par(mfrow = c(2,3))
+files <- files[-7]
 
 lapply(files, function(file_path) {
   sf_data <- st_read(file_path)
-  nb_queen <- poly2nb(sf_data, queen=TRUE)
+  if (is.na(st_crs(sf_data))) {
+    st_crs(sf_data) <- 5179
+  }
+  nb_queen <- st_touches(sf_data, sparse = FALSE) * 1L
+  # nb_queen <- poly2nb(sf_data, queen=TRUE)
+  listw_queen <- mat2listw(nb_queen, style = "B", zero.policy = TRUE)
   yr <- regmatches(basename(file_path), regexpr("\\d{4}", basename(file_path)))[1]
-  listw_queen <- nb2listw(nb_queen, style="B", zero.policy=TRUE)
+  # listw_queen <- nb2listw(nb_queen, style="B", zero.policy=TRUE)
+  listw_queen
   plot(sf_data$geometry, border='lightgrey', main=paste('Queen Contiguity Weights -', yr, " ", basename(file_path)))
   plot(listw_queen, st_coordinates(st_centroid(sf_data)), add=TRUE, col='red')
 })
