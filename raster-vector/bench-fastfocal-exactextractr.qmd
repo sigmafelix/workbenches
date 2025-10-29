@@ -1,0 +1,135 @@
+---
+title: "Focal operation and raster-vector overlay workbench"
+date: today
+author: "Insang Song"
+---
+
+
+```{r}
+library(terra)
+library(exactextractr)
+library(fastfocal)
+
+# Load raster data
+rect_ext <- c(127.2, 127.6, 36.7, 37.0)
+cog <- "/vsicurl/https://s3.openlandmap.org/arco/dtm.bareearth_ensemble_p10_30m_s_20180101_20181231_go_epsg.4326_v20230211.tif"
+
+bare <- rast(cog, win=rect_ext)
+```
+
+
+
+```{r}
+# Define a vector dataset size of 1000 random polygons
+set.seed(202510)
+n_polygons <- 1000
+polygons <- vect()
+for (i in 1:n_polygons) {
+  x_min <- runif(1, rect_ext[1], rect_ext[2] - 0.01)
+  y_min <- runif(1, rect_ext[3], rect_ext[4] - 0.01)
+  x_max <- x_min + runif(1, 0.005, 0.02)
+  y_max <- y_min + runif(1, 0.005, 0.02)
+  poly <- vect(c(paste0("POLYGON ((", x_min, " ", y_min, ", ", x_max, " ", y_min, ", ", x_max, " ", y_max, ", ", x_min, " ", y_max, ", ", x_min, " ", y_min, "))")), crs="EPSG:4326")
+  polygons <- rbind(polygons, poly)
+}
+
+polygons[["id"]] <- seq_len(n_polygons)
+```
+
+
+```{r fastfocal}
+microbenchmark::microbenchmark(
+  terrafocal = {
+    terra::focal(
+      bare,
+      w = matrix(1, nrow=17, ncol=17),
+      fun = sd,
+      na.rm = TRUE
+    )
+  },
+  fastfocal = {
+    fastfocal::fastfocal(
+      x = bare,
+      y = polygons,
+      d = 0.0025,
+      fun = "sd"
+    )
+  },
+  times = 30
+)
+
+
+```
+
+
+| expr | min | lq | mean | median | uq | max | neval | cld |
+|------|-----:|----:|------:|--------:|----:|-----:|-------:|-----|
+| terrafocal | 2.894553 | 3.868231 | 4.572785 | 4.511641 | 5.102869 | 7.041068 | 30 | a |
+| fastfocal | 3.693389 | 4.612143 | 6.277823 | 5.471501 | 5.901430 | 19.402118 | 30 | b |
+
+
+```{r fastextract}
+library(microbenchmark)
+polygons_sf <- sf::st_as_sf(polygons)
+
+microbenchmark::microbenchmark(
+  exactextractr = {
+    exactextractr::exact_extract(
+      bare,
+      polygons_sf,
+      'mean',
+      progress = FALSE
+    )
+  },
+  fastfocal = {
+    fastfocal::fastextract(
+      x = bare,
+      y = polygons,
+      d = 0,
+      fun = "mean"
+    )
+  },
+  times = 30
+)
+```
+
+| expr | min | lq | mean | median | uq | max | neval | cld |
+|-------|------------:|------------:|------------:|------------:|------------:|------------:|-------:|-----|
+| `exactextractr` | 1.632404 | 3.329678 | 6.111176 | 4.281560 | 6.578953 | 37.317469 | 100 | a |
+| `fastfocal` | 1.287430 | 1.319407 | 1.349856 | 1.341844 | 1.361994 | 1.576211 | 100 | b |
+
+
+```{r}
+extract_exa <-
+  exactextractr::exact_extract(
+    bare,
+    polygons_sf,
+    'mean',
+    progress = FALSE
+  )
+
+# polygon mode: does not work (all NaN)
+extract_ff <-
+  fastfocal::fastextract(
+    x = bare,
+    y = polygons,
+    d = 0.00125,
+    fun = "mean",
+    na.rm = TRUE
+  )
+
+# point mode: works fine
+pnts <- terra::centroids(polygons)
+extract_ffp <-
+  fastfocal::fastextract(
+    x = bare,
+    y = pnts,
+    d = 0.00125,
+    w = "rectangle",
+    fun = "mean",
+    na.rm = TRUE
+  )
+
+extract_ff
+extract_exa
+```
