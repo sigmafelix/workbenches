@@ -100,6 +100,36 @@ microbenchmark::microbenchmark(
 
 
 ```{r}
+library(reprex)
+
+reprex::reprex({
+library(terra)
+library(exactextractr)
+library(fastfocal)
+
+# Load raster data
+rect_ext <- c(127.2, 127.6, 36.7, 37.0)
+cog <- "/vsicurl/https://s3.openlandmap.org/arco/dtm.bareearth_ensemble_p10_30m_s_20180101_20181231_go_epsg.4326_v20230211.tif"
+
+bare <- rast(cog, win=rect_ext)
+
+# generate random polygons
+set.seed(202510)
+n_polygons <- 1000
+polygons <- vect()
+for (i in 1:n_polygons) {
+  x_min <- runif(1, rect_ext[1], rect_ext[2] - 0.01)
+  y_min <- runif(1, rect_ext[3], rect_ext[4] - 0.01)
+  x_max <- x_min + runif(1, 0.005, 0.02)
+  y_max <- y_min + runif(1, 0.005, 0.02)
+  poly <- vect(c(paste0("POLYGON ((", x_min, " ", y_min, ", ", x_max, " ", y_min, ", ", x_max, " ", y_max, ", ", x_min, " ", y_max, ", ", x_min, " ", y_min, "))")), crs="EPSG:4326")
+  polygons <- rbind(polygons, poly)
+}
+
+polygons[["id"]] <- seq_len(n_polygons)
+polygons_sf <- sf::st_as_sf(polygons)
+
+
 extract_exa <-
   exactextractr::exact_extract(
     bare,
@@ -130,6 +160,13 @@ extract_ffp <-
     na.rm = TRUE
   )
 
-extract_ff
-extract_exa
+summary(extract_ff)
+summary(extract_ffp)
+summary(extract_exa)
+
+all(is.nan(unlist(extract_ff)))
+all(is.numeric(extract_ffp))
+all(is.numeric(extract_exa))
+
+})
 ```
