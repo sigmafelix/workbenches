@@ -4,6 +4,8 @@ date: today
 author: "Insang Song"
 ---
 
+## Notes
+- This workbench used fastfocal 0.1.2, exactextractr 0.10.0, and terra 1.8-70.
 
 ```{r}
 library(terra)
