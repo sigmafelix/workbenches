@@ -1,0 +1,157 @@
+---
+title: "Mapping with Python packages"
+date: "2025-11-11"
+author: "Insang Song"
+---
+
+
+```{python}
+import cartopy
+import cartopy.crs as ccrs
+from pycensuskr import CensusKR
+import geopandas as gpd
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import numpy as np
+import jenkspy
+
+```
+
+```{python}
+ckr = CensusKR()
+census_bnd_2020 = ckr.load_districts(year = 2020)
+census_pop_2020 = ckr.anycensus(year = 2020, type = "population")
+
+census_bpop_2020 = census_bnd_2020.merge(
+    census_pop_2020,
+    on = 'adm2_code'
+)
+```
+
+
+```{python}
+fig = plt.figure()
+crs_5179 = ccrs.TransverseMercator(central_longitude=127.5, central_latitude=38, false_easting=1000000, false_northing=2000000)
+
+ax = fig.add_subplot(projection=crs_5179)
+# Zoom to the data extent (South Korea) with a small padding
+minx, miny, maxx, maxy = census_bpop_2020.total_bounds
+pad_x = (maxx - minx) * 0.05
+pad_y = (maxy - miny) * 0.05
+ax.set_extent([minx - pad_x, maxx + pad_x, miny - pad_y, maxy + pad_y], crs=crs_5179)
+
+# Plot the geometries coloured according to population estimate.
+
+vals = census_bpop_2020['all households_total_per'].values
+breaks = jenkspy.jenks_breaks(vals, n_classes=5)
+print("Fisher-Jenks breaks:", breaks)
+
+classes = np.searchsorted(breaks, vals, side='right') - 1
+classes[classes == len(breaks)-1] = len(breaks)-2  # fix right edge
+
+labels = [f"{breaks[i]:.0f} - {breaks[i+1]:.0f}" for i in range(len(breaks)-1)]
+census_bpop_2020['fj_class'] = classes
+census_bpop_2020['fj_class_label'] = [labels[i] for i in classes]
+
+midpoints = [(breaks[i] + breaks[i+1]) / 2 for i in range(len(breaks)-1)]
+census_bpop_2020['all households_total_per'] = [midpoints[i] for i in classes]
+# create a discrete colormap and norm from the Fisher-Jenks breaks
+cmap = plt.get_cmap('Reds', len(breaks)-1)
+norm = mcolors.BoundaryNorm(breaks, ncolors=cmap.N, clip=True)
+
+# map midpoint values to colors
+vals = census_bpop_2020['all households_total_per'].values
+facecolors = cmap(norm(vals))
+
+# draw geometries with discrete class colors and a thin border
+ax.add_geometries(
+  census_bpop_2020.geometry,
+  crs=crs_5179,
+  facecolor=facecolors,
+  edgecolor='black',
+  linewidth=0.2
+)
+
+# ScalarMappable for the colorbar (use the same cmap & norm)
+art = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+art.set_array([])  # required for the colorbar
+cbar = fig.colorbar(art, ax=ax, orientation='vertical', extend='min', shrink=0.5)
+cbar.set_label('Total population (2020)')
+
+plt.show()
+
+```
+
+
+```{python}
+import jenkspy
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
+import mapclassify as mc
+
+# Values to classify (dropna to avoid issues)
+vals = census_bpop_2020['all households_total_per'].dropna().values
+
+# Compute 5-class Jenks (fallback to quantiles if not enough unique values)
+if len(np.unique(vals)) >= 5:
+  breaks = mc.FisherJenks(census_bpop_2020['all households_total_per'].values, k=5).bins
+  breaks = np.insert(breaks, 0, vals.min())  # include min value
+else:
+  breaks = np.quantile(vals, np.linspace(0, 1, 6))
+
+# Build labels and assign class indices (0..4)
+labels = [f"{breaks[i]:.0f} - {breaks[i+1]:.0f}" for i in range(len(breaks)-1)]
+classes = np.searchsorted(breaks, census_bpop_2020['all households_total_per'].values, side='right') - 1
+classes[classes == len(breaks)-1] = len(breaks)-2  # clamp right edge
+
+census_bpop_2020['fj_class'] = classes
+census_bpop_2020['fj_label'] = [labels[i] if (i >= 0 and i < len(labels)) else 'No data' for i in classes]
+
+# Map classes to a discrete colormap
+cmap = plt.get_cmap('Reds', len(labels))
+colors = [cmap(i) for i in range(len(labels))]
+census_bpop_2020['fill_color'] = census_bpop_2020['fj_class'].map(lambda x: colors[int(x)] if (isinstance(x, (int, np.integer)) and x >= 0) else (0,0,0,0))
+
+# Plot choropleth
+ax = census_bpop_2020.plot(
+  color=census_bpop_2020['fill_color'],
+  edgecolor='black',
+  linewidth=0.2,
+  figsize=(10, 10)
+)
+
+# Legend using patches for the Jenks intervals
+patches = [Patch(facecolor=colors[i], edgecolor='black', label=labels[i]) for i in range(len(labels))]
+ax.legend(handles=patches, title='Total population (2020)', loc='lower right', frameon=True)
+
+plt.axis('off')
+plt.show()
+
+```
+
+
+```{python, eval = FALSE}
+import geoplot
+import geopandas as gpd
+import matplotlib.pyplot as plt
+# for color mapping with 5 different colors
+import mapclassify as mc
+census_bpop_2020_e = census_bpop_2020.explode()
+scheme = mc.FisherJenksSampled(census_bpop_2020_e['all households_total_per'].values, k=5)
+
+# Map
+geoplot.choropleth(
+    census_bpop_2020_e,
+    # projection = ccrs.CRS('+init=epsg:5179'),
+    hue="all households_total_per",
+    scheme=scheme,
+    cmap='inferno_r',
+    linewidth=.1,
+    edgecolor='black',
+    figsize=(10, 10)
+)
+
+plt.show()
+
+```
