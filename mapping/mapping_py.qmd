@@ -89,6 +89,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 import mapclassify as mc
+from matplotlib_map_utils.core.scale_bar import ScaleBar, scale_bar
 
 # Values to classify (dropna to avoid issues)
 vals = census_bpop_2020['all households_total_per'].dropna().values
@@ -118,12 +119,27 @@ ax = census_bpop_2020.plot(
   color=census_bpop_2020['fill_color'],
   edgecolor='black',
   linewidth=0.2,
-  figsize=(10, 10)
+  figsize=(15, 15)
 )
 
-# Legend using patches for the Jenks intervals
+# Legend using patches for the Jenks intervals — place it outside the axes on the right so it won't overlap the scale bar
 patches = [Patch(facecolor=colors[i], edgecolor='black', label=labels[i]) for i in range(len(labels))]
-ax.legend(handles=patches, title='Total population (2020)', loc='lower right', frameon=True)
+
+# make room on the right for the legend, then place legend outside the axes
+fig = ax.get_figure()
+fig.subplots_adjust(right=0.78)  # leave space on the right for the legend
+ax.legend(
+  handles=patches,
+  title='Total population (2020)',
+  loc='lower right',
+  bbox_to_anchor=(1.02, 0.1),
+  borderaxespad=0.5,
+  frameon=True
+).set_zorder(10)
+# draw scale bar at lower right
+scale_bar(ax, location="lower right", style="boxes", bar={"projection": census_bpop_2020.crs, "length": 0.18})
+
+
 
 plt.axis('off')
 plt.show()
