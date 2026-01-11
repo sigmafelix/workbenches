@@ -1,0 +1,478 @@
+---
+title: "Benchmark: terra vs DuckDB Spatial for Vector Ops (Nearest Distance, Overlay)"
+format:
+  html:
+    toc: true
+    code-fold: false
+execute:
+  warning: false
+  message: false
+  cache: false
+params:
+  seed: 42
+  crs_epsg: 3857
+  # scale / size (planar meters-ish in EPSG:3857)
+  bbox_size_m: 100000
+  # data sizes
+  n_points: 20000
+  n_poly_a: 4000
+  n_poly_b: 4000
+  # benchmark control
+  iterations: 5
+  warmup: true
+---
+
+## Notes and scope
+
+This Quarto document benchmarks two common vector workloads:
+
+1. **Closest distance (nearest-neighbor distance):** for each point, distance to its nearest polygon (centroid-based neighbor search in `terra` vs SQL-based ordering in DuckDB).
+2. **Vector overlay (polygon intersection):** polygon A ∩ polygon B.
+
+DuckDB uses the **Spatial extension** and PostGIS-like functions (e.g., `ST_Distance`, `ST_Intersects`, `ST_Intersection`).   
+To ingest geometries in R, we pass WKB and decode using `ST_GeomFromWKB`.
+
+> Important: “nearest neighbor” strategies differ across engines. Here we implement practical, comparable approaches, but they are not guaranteed to be algorithmically identical (indexing, numeric robustness, centroid-vs-boundary distance choices).
+
+---
+
+## Setup
+
+```{r}
+# Core
+library(bench)
+library(data.table)
+
+# terra
+library(terra)
+
+# duckdb
+library(DBI)
+library(duckdb)
+
+# For WKB creation from terra -> DuckDB
+library(sf)
+
+# bench::mark_check()  # prints basic info; safe
+params <- list(
+  seed = 42,
+  crs_epsg = 3857,
+  # scale / size (planar meters-ish in EPSG:3857)
+  bbox_size_m = 100000,
+  # data sizes
+  n_points = 20000,
+  n_poly_a = 4000,
+  n_poly_b = 4000,
+  # benchmark control
+  iterations = 5,
+  warmup = TRUE
+)
+
+
+```
+
+### Utility: reproducible random data (points + rectangles)
+
+We generate:
+
+* random **points**
+* random **axis-aligned rectangles** (polygons) for A and B
+
+All in a planar CRS (default EPSG:3857) for stable distance units.
+
+```{r}
+set.seed(params$seed)
+
+crs_epsg <- params$crs_epsg
+bbox <- params$bbox_size_m
+
+# helper to create random points
+
+make_points <- function(n, bbox, crs_epsg) {
+xy <- cbind(runif(n, 0, bbox), runif(n, 0, bbox))
+terra::vect(xy, type = "points", crs = paste0("EPSG:", crs_epsg))
+}
+
+# helper to create random rectangles as polygons
+
+make_rectangles <- function(n, bbox, crs_epsg, min_size = bbox * 0.002, max_size = bbox * 0.01) {
+
+# bottom-left corner
+
+x0 <- runif(n, 0, bbox)
+y0 <- runif(n, 0, bbox)
+w  <- runif(n, min_size, max_size)
+h  <- runif(n, min_size, max_size)
+
+x1 <- pmin(x0 + w, bbox)
+y1 <- pmin(y0 + h, bbox)
+
+# terra extents -> polygons
+
+exts <- Map(terra::ext, x0, x1, y0, y1)
+polys <- lapply(exts, terra::as.polygons, crs = paste0("EPSG:", crs_epsg))
+
+v <- do.call(rbind, polys)
+v
+}
+
+pts   <- make_points(params$n_points, params$bbox_size_m, crs_epsg)
+polyA <- make_rectangles(params$n_poly_a, params$bbox_size_m, crs_epsg)
+polyB <- make_rectangles(params$n_poly_b, params$bbox_size_m, crs_epsg)
+
+# add ids
+
+pts$id   <- seq_len(nrow(pts))
+polyA$id <- seq_len(nrow(polyA))
+polyB$id <- seq_len(nrow(polyB))
+
+c(n_points = nrow(pts), n_polyA = nrow(polyA), n_polyB = nrow(polyB))
+
+```
+
+
+## DuckDB Spatial initialization
+
+DuckDB Spatial is provided by the `spatial` extension. ([DuckDB][1])
+
+```{r}
+con <- dbConnect(duckdb::duckdb(), dbdir = ":memory:")
+
+# Install+load spatial extension (downloads may occur depending on your environment)
+
+dbExecute(con, "INSTALL spatial;")
+dbExecute(con, "LOAD spatial;")
+```
+
+### Move geometries into DuckDB (WKB)
+
+DuckDB Spatial commonly ingests WKB and converts to GEOMETRY using `ST_GeomFromWKB`.
+
+```{r}
+# Convert terra SpatVector -> sf -> WKB
+
+to_wkb_df <- function(v, geom_col = "wkb") {
+s <- sf::st_as_sf(v)
+
+# keep only attributes + geometry
+
+wkb <- sf::st_as_binary(sf::st_geometry(s), EWKB = FALSE)
+out <- as.data.frame(sf::st_drop_geometry(s))
+out[[geom_col]] <- wkb
+out
+}
+
+pts_df   <- to_wkb_df(pts)
+polyA_df <- to_wkb_df(polyA)
+polyB_df <- to_wkb_df(polyB)
+
+dbWriteTable(con, "pts", pts_df, overwrite = TRUE)
+dbWriteTable(con, "polyA", polyA_df, overwrite = TRUE)
+dbWriteTable(con, "polyB", polyB_df, overwrite = TRUE)
+
+# Create views with decoded GEOMETRY
+
+dbExecute(con, "
+CREATE OR REPLACE VIEW pts_g AS
+SELECT id, ST_GeomFromWKB(wkb) AS geom
+FROM pts;
+")
+
+dbExecute(con, "
+CREATE OR REPLACE VIEW polyA_g AS
+SELECT id, ST_GeomFromWKB(wkb) AS geom
+FROM polyA;
+")
+
+dbExecute(con, "
+CREATE OR REPLACE VIEW polyB_g AS
+SELECT id, ST_GeomFromWKB(wkb) AS geom
+FROM polyB;
+")
+
+
+# Create materialized tables (not views) with decoded geometries
+dbExecute(con, "
+CREATE TABLE pts_indexed AS
+SELECT id, ST_GeomFromWKB(wkb) AS geom
+FROM pts;
+")
+
+dbExecute(con, "
+CREATE TABLE polyA_indexed AS
+SELECT id, ST_GeomFromWKB(wkb) AS geom
+FROM polyA;
+")
+
+dbExecute(con, "
+CREATE TABLE polyB_indexed AS
+SELECT id, ST_GeomFromWKB(wkb) AS geom
+FROM polyB;
+")
+
+
+# Create spatial indices (R-tree style)
+dbExecute(con, "CREATE INDEX idx_pts ON pts_indexed (geom);")
+dbExecute(con, "CREATE INDEX idx_polyA ON polyA_indexed (geom);")
+dbExecute(con, "CREATE INDEX idx_polyB ON polyB_indexed (geom);")
+
+
+# sanity checks
+
+dbGetQuery(con, "SELECT COUNT(*) AS n_pts FROM pts_g;")
+dbGetQuery(con, "SELECT COUNT(*) AS n_a FROM polyA_g;")
+dbGetQuery(con, "SELECT COUNT(*) AS n_b FROM polyB_g;")
+```
+
+
+## Workload 1: Closest distance (point -> nearest polygon)
+
+### terra implementation
+
+We use `nearby(x, y, k=1, centroids=TRUE)` to get nearest polygon per point (centroid-based), returning indices and distances.
+
+```{r}
+terra_nearest_distance <- function(pts, polys) {
+
+# returns a matrix; conventionally includes indices and distance
+
+# (column names may vary across versions; we use positional columns robustly)
+
+m <- terra::nearest(pts, polys, centroids = TRUE,  method = "geo")
+
+# Expect columns: from, to, distance (commonly 3 cols)
+
+# Return as data.table for parity
+
+data.table::as.data.table(
+  as.data.frame(m)[, c(1, 4, 5)]
+# pt_id = pts$id[unlist(m[, 1])],
+# poly_id = polys$id[unlist(m[, 4])],
+# dist = as.vector(m[, 7])
+)
+}
+
+if (isTRUE(params$warmup)) {
+invisible(terra_nearest_distance(pts[1:200,], polyA[1:500,]))
+}
+```
+
+### DuckDB implementation
+
+We compute, per point, the nearest polygon by ordering on `ST_Distance` and taking the smallest distance (LATERAL join).
+
+`ST_Distance` is part of DuckDB Spatial functions.
+
+```{r}
+duckdb_nearest_distance <- function(con) {
+sql <- "
+SELECT
+p.id AS pt_id,
+nn.poly_id,
+nn.dist
+FROM pts_g p
+JOIN LATERAL (
+SELECT
+a.id AS poly_id,
+ST_Distance(p.geom, ST_Centroid(a.geom)) AS dist
+FROM polyA_g a
+ORDER BY dist
+LIMIT 1
+) nn
+ON TRUE;
+"
+# revised version
+sql <- "
+-- Pre-compute centroids once
+CREATE TABLE polyA_centroids AS
+SELECT id, ST_Centroid(geom) AS centroid
+-- SELECT id, ST_Centroid(ST_GeomFromWKB(wkb)) AS centroid
+FROM polyA_indexed;
+
+-- Use window function or KNN approach if available
+-- Or at minimum, reference the pre-computed centroids
+SELECT p.id AS pt_id, 
+       nn.poly_id, 
+       nn.dist
+FROM pts_indexed p
+JOIN LATERAL (
+    SELECT a.id AS poly_id,
+           ST_Distance(p.geom, a.centroid) AS dist
+    FROM polyA_centroids a
+    ORDER BY dist
+    LIMIT 1
+) nn ON TRUE;
+
+-- Clean up temporary table
+DROP TABLE polyA_centroids;
+"
+
+data.table::as.data.table(dbGetQuery(con, sql))
+}
+
+if (isTRUE(params$warmup)) {
+
+# warmup with reduced views
+
+dbExecute(con, "CREATE OR REPLACE VIEW pts_g_small AS SELECT * FROM pts_g LIMIT 200;")
+dbExecute(con, "CREATE OR REPLACE VIEW polyA_g_small AS SELECT * FROM polyA_g LIMIT 500;")
+invisible(dbGetQuery(con, "
+SELECT p.id, nn.*
+FROM pts_g_small p
+JOIN LATERAL (
+SELECT a.id AS poly_id, ST_Distance(p.geom, a.geom) AS dist
+FROM polyA_g_small a
+ORDER BY dist
+LIMIT 1
+) nn ON TRUE;
+"))
+dbExecute(con, "DROP VIEW pts_g_small;")
+dbExecute(con, "DROP VIEW polyA_g_small;")
+}
+
+```
+
+## Workload 2: Vector overlay (polygon intersection A ∩ B)
+
+### terra implementation
+
+We benchmark `terra::intersect(polyA, polyB)` which returns intersected geometries with attributes from both inputs.
+
+```{r}
+
+terra_overlay_intersection <- function(polyA, polyB) {
+terra::intersect(polyA, polyB)
+}
+
+if (isTRUE(params$warmup)) {
+invisible(terra_overlay_intersection(polyA[1:200,], polyB[1:200,]))
+}
+```
+### DuckDB implementation
+
+We use `ST_Intersects` to filter candidate pairs and `ST_Intersection` to compute the overlay geometry.
+
+DuckDB documents spatial joins and intersection predicates in the spatial extension context. ([DuckDB][5])
+
+```{r}
+duckdb_overlay_intersection <- function(con) {
+sql <- "
+SELECT
+a.id AS a_id,
+b.id AS b_id,
+ST_Intersection(a.geom, b.geom) AS geom
+FROM polyA_g a
+JOIN polyB_g b
+ON ST_Intersects(a.geom, b.geom)
+"
+
+# Fetching GEOMETRY can be heavy; we fetch counts + total bytes via WKB for a stable measure
+# Convert to WKB blob for transfer
+
+sql2 <- paste0("
+WITH x AS (", sql, ")
+SELECT
+COUNT(*) AS n_out,
+SUM(OCTET_LENGTH(ST_AsWKB(geom)::BLOB)) AS total_wkb_bytes
+FROM x;
+")
+dbGetQuery(con, sql2)
+}
+
+if (isTRUE(params$warmup)) {
+dbExecute(con, "CREATE OR REPLACE VIEW polyA_g_small AS SELECT * FROM polyA_g LIMIT 200;")
+dbExecute(con, "CREATE OR REPLACE VIEW polyB_g_small AS SELECT * FROM polyB_g LIMIT 200;")
+invisible(dbGetQuery(con, "
+WITH x AS (
+SELECT ST_Intersection(a.geom, b.geom) AS geom
+FROM polyA_g_small a
+JOIN polyB_g_small b
+ON ST_Intersects(a.geom, b.geom)
+)
+SELECT COUNT(*) AS n_out FROM x;
+"))
+dbExecute(con, "DROP VIEW polyA_g_small;")
+dbExecute(con, "DROP VIEW polyB_g_small;")
+}
+
+```
+
+## Benchmarks
+
+### 1) Nearest distance
+```{r}
+bm_nearest <- bench::mark(
+    terra = terra_nearest_distance(pts, polyA),
+    duckdb = duckdb_nearest_distance(con),
+    iterations = params$iterations,
+    check = FALSE
+)
+bm_nearest
+```
+
+
+```{r}
+# sample-level sanity check (not strict equality due to implementation differences)
+
+td <- terra_nearest_distance(pts[1:200,], polyA)
+
+# Build small DuckDB views for matching sample
+
+dbExecute(con, "CREATE OR REPLACE TEMP TABLE pts_tmp AS SELECT * FROM pts LIMIT 200;")
+dbExecute(con, "CREATE OR REPLACE TEMP TABLE polyA_tmp AS SELECT * FROM polyA LIMIT 2000;")
+dbExecute(con, "CREATE OR REPLACE TEMP VIEW pts_tmp_g AS SELECT id, ST_GeomFromWKB(wkb) AS geom FROM pts_tmp;")
+dbExecute(con, "CREATE OR REPLACE TEMP VIEW polyA_tmp_g AS SELECT id, ST_GeomFromWKB(wkb) AS geom FROM polyA_tmp;")
+
+dd <- data.table::as.data.table(dbGetQuery(con, "
+SELECT p.id AS pt_id, nn.poly_id, nn.dist
+FROM pts_tmp_g p
+JOIN LATERAL (
+SELECT a.id AS poly_id, ST_Distance(p.geom, a.geom) AS dist
+FROM polyA_tmp_g a
+ORDER BY dist
+LIMIT 1
+) nn ON TRUE;
+"))
+
+# compare distributions (implementation differs; this is indicative only)
+
+data.table::data.table(
+engine = c("terra", "duckdb"),
+mean_dist = c(mean(td$dist), mean(dd$dist)),
+p50 = c(stats::median(td$dist), stats::median(dd$dist)),
+p95 = c(stats::quantile(td$dist, 0.95), stats::quantile(dd$dist, 0.95))
+)
+
+dbExecute(con, "DROP VIEW pts_tmp_g;")
+dbExecute(con, "DROP VIEW polyA_tmp_g;")
+dbExecute(con, "DROP TABLE pts_tmp;")
+dbExecute(con, "DROP TABLE polyA_tmp;")
+
+### 2) Polygon overlay intersection
+
+bm_overlay <- bench::mark(
+terra = terra_overlay_intersection(polyA, polyB),
+duckdb = duckdb_overlay_intersection(con),
+iterations = 100,
+check = FALSE
+)
+bm_overlay
+
+```
+
+## Results summary tables
+
+```{r}
+nearest_summary <- summary(bm_nearest)[, c("expression","min","median","itr/sec","mem_alloc","n_gc")]
+overlay_summary <- summary(bm_overlay)[, c("expression","min","median","itr/sec","mem_alloc","n_gc")]
+
+nearest_summary
+overlay_summary
+```
+
+## Cleanup
+```{r}
+dbDisconnect(con, shutdown = TRUE)
+```
+
+
