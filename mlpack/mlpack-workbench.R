@@ -117,3 +117,37 @@ lasso_model <- output$output_model
 
 output <- lars(input_model = lasso_model, test = test)
 test_predictions <- output$output_predictions
+
+
+#
+tetuan <- "~/Downloads/Tetuan City power consumption.csv"
+tetuan_df <- read.csv(tetuan)
+yvec <- c("Zone.1.Power.Consumption", "Zone.2..Power.Consumption", "Zone.3..Power.Consumption")
+xvec <- setdiff(colnames(tetuan_df), yvec)
+formula_list <-
+  lapply(yvec, function(y) {
+    as.formula(paste(y, "~", paste(xvec, collapse = "+")))
+  })
+
+tetuan_df$DateTime <- as.POSIXct(tetuan_df$DateTime, format = "%m/%d/%Y %H:%M")
+tetuan_df$DateTime <- as.numeric(tetuan_df$DateTime)
+# tetuan_df |> str()
+
+tetuan_mat_in <- as.matrix(tetuan_df[, xvec])
+tetuan_mat_out <- as.matrix(tetuan_df[, yvec[1]])
+
+z1_rf <-
+  mlpack::bayesian_linear_regression(
+    input = tetuan_mat_in,
+    responses = tetuan_mat_out,
+    verbose = TRUE
+  )
+
+z1_rf_model <- z1_rf$output_model
+rf_base_pred <- bayesian_linear_regression(
+  input_model = z1_rf_model,
+  test = tetuan_mat_in,
+  verbose = TRUE
+)
+
+rf_base_pred$predictions - tetuan_mat_out
