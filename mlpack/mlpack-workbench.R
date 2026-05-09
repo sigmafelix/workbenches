@@ -151,3 +151,50 @@ rf_base_pred <- bayesian_linear_regression(
 )
 
 rf_base_pred$predictions - tetuan_mat_out
+
+storage.mode(tetuan_mat_in) <- "double"
+storage.mode(tetuan_mat_out) <- "double"
+
+z1_lars <-
+  mlpack::lars(
+    input = tetuan_mat_in[1:10000,],
+    responses = tetuan_mat_out[1:10000,],
+    lambda1 = 0.4, lambda2 = 0.0,
+    verbose = TRUE,
+    use_cholesky = FALSE
+  )
+
+z1_lars_model <- z1_lars$output_model
+# ???
+## Error: matrix multiplication: incompatible matrix dimensions: 6x52416 and 6x1
+z1_lars_pred <- mlpack::lars(
+  input_model = z1_lars_model,
+  test = tetuan_mat_in,
+  verbose = TRUE
+)
+
+
+# compare rf vs lars with dedicated packages
+library(ranger)
+library(glmnet)
+
+# 1. ranger
+ranger_rf <- ranger::ranger(
+  formula = formula_list[[1]],
+  data = tetuan_df,
+  num.trees = 500,
+  min.node.size = 5,
+  verbose = TRUE
+)
+
+# 2. glmnet
+glmnet_lars <- glmnet::glmnet(
+  x = tetuan_mat_in,
+  y = tetuan_mat_out,
+  alpha = 1, # lasso
+  lambda = 0.4
+)
+
+diff_rf_glm <- ranger_rf$predictions - predict(glmnet_lars, tetuan_mat_in)
+
+mean(abs(diff_rf_glm))
